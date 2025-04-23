@@ -1,0 +1,70 @@
+FROM continuumio/miniconda3
+
+# Install system dependencies
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    libgoogle-perftools-dev \
+    git \
+    wget \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create conda environment with Python 3.10
+RUN conda create -n vton python=3.10 -y
+SHELL ["/bin/bash", "-c"]
+
+# Create cache directories with proper permissions
+RUN mkdir -p /.cache/huggingface/hub && chmod -R 777 /.cache
+RUN mkdir -p /.config/matplotlib && chmod -R 777 /.config
+
+# Create app directory
+RUN mkdir -p /app
+WORKDIR /app
+
+# Clone repository
+RUN git clone https://github.com/FurkanGozukara/IDM-VTON .
+
+# Set up conda environment and install dependencies
+RUN source activate vton && \
+    pip install -r requirements.txt && \
+    pip install huggingface_hub hf_transfer fastapi uvicorn python-multipart && \
+    rm -rf /opt/conda/envs/vton/lib/python3.10/site-packages/numpy* && \
+    pip install numpy==1.26.4 && \
+    pip install bitsandbytes==0.43.0 accelerate==0.30.1 peft==0.11.1 xformers && \
+    pip install pydantic==2.10.6 && \
+    pip install torchvision==0.19.1 --extra-index-url https://download.pytorch.org/whl/cu121
+
+# Set environment variable for HuggingFace transfer
+ENV HF_HUB_ENABLE_HF_TRANSFER=1
+
+# Make Python print immediately without buffering
+ENV PYTHONUNBUFFERED=1
+
+# Force flush for stdout
+ENV PYTHONFAULTHANDLER=1
+
+# Set cache directories
+ENV TRANSFORMERS_CACHE=/.cache/huggingface/hub
+ENV MPLCONFIGDIR=/.config/matplotlib
+
+# Make sure CUDA is visible to the container
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Create outputs directory with proper permissions
+RUN mkdir -p /app/outputs && chmod -R 777 /app/outputs
+
+# Expose port 80 for HF Inference Endpoints 
+EXPOSE 80
+
+# Copy our Hugging Face compatible API file
+COPY api_VTON_hf.py /app/api_VTON_hf.py
+
+# Set the entrypoint to run the Hugging Face API
+ENTRYPOINT ["/bin/bash", "-c"]
+CMD ["source activate vton && python -u api_VTON_hf.py --load_mode 8bit"] 

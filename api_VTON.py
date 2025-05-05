@@ -33,6 +33,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import time
 import uuid
+import tempfile  # Add this import for temporary files
 
 # Create FastAPI app
 app = FastAPI(title="IDM-VTON API", description="Virtual Try-on API with Stable Diffusion")
@@ -350,11 +351,41 @@ async def tryon(
     category: str = Form(...),
     auto_mask: bool = Form(True),
     denoise_steps: int = Form(30),
-    seed: int = Form(1)
+    seed: int = Form(1),
+    jacket: bool = Form(False)  # Add new jacket parameter
 ):
     # Read the uploaded files
     human_img_data = await human_img.read()
     garm_img_data = await garm_img.read()
+    
+    # Apply overlay to garment image if jacket is True
+    if jacket:
+        # Save garment image to a temporary file
+        temp_garm_path = os.path.join("temp", f"garment_{uuid.uuid4()}.png")
+        os.makedirs("temp", exist_ok=True)
+        with open(temp_garm_path, "wb") as f:
+            f.write(garm_img_data)
+        
+        # Path to the overlay image
+        overlay_img_path = "PHOTO-2025-03-11-06-55-45-removebg-preview.png"
+        
+        # Output path for the modified garment image
+        modified_garm_path = os.path.join("temp", f"modified_garment_{uuid.uuid4()}.png")
+        
+        # Import and use the hardcoded overlay function
+        from hardcoded_overlay import apply_overlay_with_hardcoded_config
+        apply_overlay_with_hardcoded_config(temp_garm_path, overlay_img_path, modified_garm_path)
+        
+        # Read the modified garment image
+        with open(modified_garm_path, "rb") as f:
+            garm_img_data = f.read()
+        
+        # Clean up temporary files
+        try:
+            os.remove(temp_garm_path)
+            os.remove(modified_garm_path)  # Also clean up modified image file
+        except:
+            pass
     
     # Create a job ID
     job_id = str(uuid.uuid4())

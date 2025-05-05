@@ -373,12 +373,16 @@ async def tryon(
         modified_garm_path = os.path.join("temp", f"modified_garment_{uuid.uuid4()}.png")
         
         # Import and use the hardcoded overlay function
-        from hardcoded_overlay import apply_overlay_with_hardcoded_config, apply_white_background
+        from hardcoded_overlay import apply_overlay_with_hardcoded_config, apply_white_background, auto_crop_image
         apply_overlay_with_hardcoded_config(temp_garm_path, overlay_img_path, modified_garm_path)
         
-        # Apply white background to the overlaid image
+        # Auto-crop to remove extra space
+        cropped_path = os.path.join("temp", f"modified_garment_cropped_{uuid.uuid4()}.png")
+        auto_crop_image(modified_garm_path, cropped_path)
+        
+        # Apply white background to the cropped image
         white_bg_path = os.path.join("temp", f"modified_garment_white_bg_{uuid.uuid4()}.png")
-        apply_white_background(modified_garm_path, white_bg_path)
+        apply_white_background(cropped_path, white_bg_path)
         
         # Read the modified garment image with white background
         with open(white_bg_path, "rb") as f:
@@ -388,7 +392,8 @@ async def tryon(
         # try:
         #     os.remove(temp_garm_path)
         #     os.remove(modified_garm_path)
-        #     os.remove(white_bg_path)  # Also clean up white background image file
+        #     os.remove(cropped_path)
+        #     os.remove(white_bg_path)
         # except:
         #     pass
     

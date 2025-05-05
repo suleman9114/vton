@@ -373,17 +373,22 @@ async def tryon(
         modified_garm_path = os.path.join("temp", f"modified_garment_{uuid.uuid4()}.png")
         
         # Import and use the hardcoded overlay function
-        from hardcoded_overlay import apply_overlay_with_hardcoded_config
+        from hardcoded_overlay import apply_overlay_with_hardcoded_config, apply_white_background
         apply_overlay_with_hardcoded_config(temp_garm_path, overlay_img_path, modified_garm_path)
         
-        # Read the modified garment image
-        with open(modified_garm_path, "rb") as f:
+        # Apply white background to the overlaid image
+        white_bg_path = os.path.join("temp", f"modified_garment_white_bg_{uuid.uuid4()}.png")
+        apply_white_background(modified_garm_path, white_bg_path)
+        
+        # Read the modified garment image with white background
+        with open(white_bg_path, "rb") as f:
             garm_img_data = f.read()
         
         # Clean up temporary files
         try:
             os.remove(temp_garm_path)
-            os.remove(modified_garm_path)  # Also clean up modified image file
+            os.remove(modified_garm_path)
+            os.remove(white_bg_path)  # Also clean up white background image file
         except:
             pass
     

@@ -389,13 +389,13 @@ async def tryon(
             garm_img_data = f.read()
         
         # Clean up temporary files
-        # try:
-        #     os.remove(temp_garm_path)
-        #     os.remove(modified_garm_path)
-        #     os.remove(cropped_path)
-        #     os.remove(white_bg_path)
-        # except:
-        #     pass
+        try:
+            os.remove(temp_garm_path)
+            os.remove(modified_garm_path)
+            os.remove(cropped_path)
+            os.remove(white_bg_path)
+        except:
+            pass
     
     # Create a job ID
     job_id = str(uuid.uuid4())

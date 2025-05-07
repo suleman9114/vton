@@ -13,6 +13,7 @@ RUN apt-get update && \
     libsm6 \
     libxrender1 \
     libxext6 \
+    socat \  # Add socat for IPv6 routing
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -21,7 +22,7 @@ RUN conda create -n vton python=3.10 -y
 SHELL ["/bin/bash", "-c"]
 
 # Clone repository
-RUN git clone https://github.com/FurkanGozukara/IDM-VTON .
+RUN git clone https://github.com/suleman9114/vton.git .
 
 # Install base requirements
 RUN source activate vton && pip install -r requirements.txt
@@ -48,9 +49,8 @@ ENV MPLCONFIGDIR=/.config/matplotlib
 
 RUN mkdir -p /app/outputs && chmod -R 777 /app/outputs
 
-# Copy API script and model files
-COPY api_VTON.py /app/api_VTON.py
-COPY ckpt/ /app/ckpt/
+# Download model files
+RUN source activate vton && python -u models_download.py
 
 # Expose the port the app runs on
 EXPOSE 80
@@ -63,6 +63,15 @@ RUN mkdir -p /.config/matplotlib && chmod -R 777 /.config
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-# Run the application with conda environment activated
+# Create script to start app with IPv6 support
+RUN echo '#!/bin/bash\n\
+source activate vton\n\
+# Start socat to forward IPv6 traffic to IPv4\n\
+socat TCP6-LISTEN:80,fork TCP4:0.0.0.0:8080 &\n\
+# Run the API on IPv4 address 0.0.0.0 port 8080\n\
+python -u api_VTON.py --load_mode 8bit --port 8080\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+# Run the application with IPv6 support
 ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["source activate vton && python -u api_VTON.py --load_mode 8bit"] 
+CMD ["/app/start.sh"]

@@ -62,6 +62,9 @@ parser.add_argument("--lowvram", action="store_true", help="Enable CPU offload f
 parser.add_argument("--load_mode", default=None, type=str, choices=["4bit", "8bit"], help="Quantization mode for optimization memory consumption")
 parser.add_argument("--fixed_vae", action="store_true", default=True, help="Use fixed vae for FP16.")
 parser.add_argument("--port", type=int, default=80, help="Port to run the API on")
+parser.add_argument("--ipv6", action="store_true", help="Enable IPv6 support")
+parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server to")
+
 
 # Class for tracking job status
 class JobStatus(BaseModel):
@@ -454,5 +457,9 @@ if __name__ == "__main__":
     initialize_models(args.load_mode, args.fixed_vae)
     print("Models initialized successfully!")
     
+    # Set host to IPv6 address if --ipv6 flag is used
+    host = "::" if args.ipv6 else args.host
+    
     # Run the server
-    uvicorn.run(app, host="0.0.0.0", port=args.port) 
+    print(f"Starting server on {host}:{args.port}")
+    uvicorn.run(app, host=host, port=args.port)

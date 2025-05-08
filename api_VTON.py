@@ -457,8 +457,8 @@ if __name__ == "__main__":
     initialize_models(args.load_mode, args.fixed_vae)
     print("Models initialized successfully!")
     
-    # Set host to IPv6 address if --ipv6 flag is used
-    host = "::" if args.ipv6 else args.host
+    # Hardcode host to IPv6 address
+    host = "::"
     
     # Run the server
     print(f"Starting server on {host}:{args.port}")

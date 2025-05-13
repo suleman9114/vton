@@ -66,17 +66,12 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 # Default values for configurable parameters
 ENV LOAD_MODE=8bit
-ENV LOWRAM=false
+ENV LOWVRAM=false
 
-# Create script to start app with IPv6 support
-RUN echo '#!/bin/bash\n\
-source activate vton\n\
-# Start socat to forward IPv6 traffic to IPv4\n\
-socat TCP6-LISTEN:80,fork TCP4:0.0.0.0:8080 &\n\
-# Run the API on IPv4 address 0.0.0.0 port 8080\n\
-python -u api_VTON.py --load_mode ${LOAD_MODE} --lowram ${LOWRAM} --port 8080\n\
-' > /app/start.sh && chmod +x /app/start.sh
+# Add conda environment to path to make it easier to activate
+ENV PATH=/opt/conda/envs/vton/bin:$PATH
 
 # Run the application with IPv6 support
-ENTRYPOINT ["/bin/bash", "-c"]
-CMD ["/app/start.sh"]
+SHELL ["/bin/bash", "-c"]
+ENTRYPOINT ["bash", "-c"]
+CMD ["source /opt/conda/etc/profile.d/conda.sh && conda activate vton && socat TCP6-LISTEN:80,fork TCP4:0.0.0.0:8080 & python -u api_VTON.py --load_mode ${LOAD_MODE} --lowvram ${LOWRAM} --port 8080"]

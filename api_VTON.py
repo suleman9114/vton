@@ -463,4 +463,4 @@ if __name__ == "__main__":
     
     # Run the server
     print(f"Starting server on {host}:{args.port}")
-    uvicorn.run(app, host="0.0.0.0", port=args.port)
+    uvicorn.run(app, host=host, port=args.port)

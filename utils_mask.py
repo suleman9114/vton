@@ -51,7 +51,7 @@ def refine_mask(mask):
 
     return refine_mask
 
-def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: dict, width=384, height=512, jacket=False, hip_ratio=0.15):
+def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: dict, width=384, height=512, jacket=False, hip_ratio=0.15, hand_radius_ratio=0.06):
     im_parse = model_parse.resize((width, height), Image.NEAREST)
     parse_array = np.array(im_parse)
 
@@ -79,11 +79,14 @@ def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: 
 
     # Special case for jacket
     if jacket:
-        # For jacket, we want to mask out the upper body till hips
-        # Create mask for upper body (torso)
-        upper_body_mask = (parse_array == label_map["upper_clothes"]).astype(np.float32) + \
-                         (parse_array == label_map["left_arm"]).astype(np.float32) + \
-                         (parse_array == label_map["right_arm"]).astype(np.float32)
+        # For jacket, we want to mask out the upper body till hips, excluding head and arms
+        # Create mask for upper body (torso only)
+        upper_body_mask = (parse_array == label_map["upper_clothes"]).astype(np.float32)
+        
+        # Exclude arms completely - don't include them in the mask
+        left_arm_mask = (parse_array == label_map["left_arm"]).astype(np.float32)
+        right_arm_mask = (parse_array == label_map["right_arm"]).astype(np.float32)
+        arms_mask = left_arm_mask + right_arm_mask
         
         # Add part of the lower body (to include the hips)
         hips_area = (parse_array == label_map["pants"]).astype(np.float32) + \
@@ -105,59 +108,26 @@ def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: 
         # Combine upper body and hips mask - ensure it's float32 type
         parse_mask = (upper_body_mask + hips_mask).astype(np.float32)
         
-        # Fix the parser mask to exclude head and keep lower body
-        parser_mask_fixed += parse_head
+        # Add head and arms to the parser_mask_fixed to preserve them
+        parser_mask_fixed += parse_head + arms_mask
         parser_mask_changeable += np.logical_and(parse_array, np.logical_not(parser_mask_fixed))
         
-        # Create custom arm masks for jacket
-        # Load pose points for arms
-        pose_data = keypoint["pose_keypoints_2d"]
-        pose_data = np.array(pose_data)
-        pose_data = pose_data.reshape((-1, 2))
-        
-        im_arms_left = Image.new('L', (width, height))
-        im_arms_right = Image.new('L', (width, height))
-        arms_draw_left = ImageDraw.Draw(im_arms_left)
-        arms_draw_right = ImageDraw.Draw(im_arms_right)
-        
-        shoulder_right = np.multiply(tuple(pose_data[2][:2]), height / 512.0)
-        shoulder_left = np.multiply(tuple(pose_data[5][:2]), height / 512.0)
-        elbow_right = np.multiply(tuple(pose_data[3][:2]), height / 512.0)
-        elbow_left = np.multiply(tuple(pose_data[6][:2]), height / 512.0)
-        wrist_right = np.multiply(tuple(pose_data[4][:2]), height / 512.0)
-        wrist_left = np.multiply(tuple(pose_data[7][:2]), height / 512.0)
-        
-        ARM_LINE_WIDTH = int(arm_width / 512 * height)
-        size_left = [shoulder_left[0] - ARM_LINE_WIDTH // 2, shoulder_left[1] - ARM_LINE_WIDTH // 2, 
-                    shoulder_left[0] + ARM_LINE_WIDTH // 2, shoulder_left[1] + ARM_LINE_WIDTH // 2]
-        size_right = [shoulder_right[0] - ARM_LINE_WIDTH // 2, shoulder_right[1] - ARM_LINE_WIDTH // 2, 
-                     shoulder_right[0] + ARM_LINE_WIDTH // 2, shoulder_right[1] + ARM_LINE_WIDTH // 2]
-        
-        if wrist_right[0] <= 1. and wrist_right[1] <= 1.:
-            im_arms_right = arms_right
-        else:
-            wrist_right = extend_arm_mask(wrist_right, elbow_right, 1.2)
-            arms_draw_right.line(np.concatenate((shoulder_right, elbow_right, wrist_right)).astype(np.uint16).tolist(), 'white', ARM_LINE_WIDTH, 'curve')
-            arms_draw_right.arc(size_right, 0, 360, 'white', ARM_LINE_WIDTH // 2)
-
-        if wrist_left[0] <= 1. and wrist_left[1] <= 1.:
-            im_arms_left = arms_left
-        else:
-            wrist_left = extend_arm_mask(wrist_left, elbow_left, 1.2)
-            arms_draw_left.line(np.concatenate((wrist_left, elbow_left, shoulder_left)).astype(np.uint16).tolist(), 'white', ARM_LINE_WIDTH, 'curve')
-            arms_draw_left.arc(size_left, 0, 360, 'white', ARM_LINE_WIDTH // 2)
-        
-        # Convert PIL images to numpy arrays for OpenCV operations
-        im_arms_left_np = np.array(im_arms_left).astype(np.float32) / 255.0
-        im_arms_right_np = np.array(im_arms_right).astype(np.float32) / 255.0
-        
-        # Dilate arm mask
-        arm_mask = cv2.dilate(np.logical_or(im_arms_left_np, im_arms_right_np).astype(np.float32), 
-                             np.ones((5, 5), np.uint8), iterations=4)
-        
-        # Ensure parse_mask is properly dilated
-        parse_mask = cv2.dilate(parse_mask, np.ones((5, 5), np.uint8), iterations=5)
-        parse_mask = np.logical_or(parse_mask, arm_mask).astype(np.float32)
+        # Instead of dilating the entire mask, only expand downward
+        # First, get the bottom boundary of the upper body
+        if np.sum(upper_body_mask) > 0:
+            upper_indices = np.where(upper_body_mask > 0)
+            if len(upper_indices[0]) > 0:
+                max_row_upper = np.max(upper_indices[0])
+                
+                # Create a directional kernel that only expands downward
+                down_kernel = np.zeros((5, 5), np.uint8)
+                down_kernel[2:, 1:-1] = 1  # Only set bottom half of kernel to 1
+                
+                # Apply directional dilation to expand only downward
+                downward_expansion = cv2.dilate(upper_body_mask, down_kernel, iterations=5)
+                
+                # Combine with original mask
+                parse_mask = np.logical_or(parse_mask, downward_expansion).astype(np.float32)
         
     elif category == 'dresses':
         parse_mask = (parse_array == 7).astype(np.float32) + \

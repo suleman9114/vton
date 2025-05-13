@@ -174,7 +174,7 @@ def initialize_models(load_mode, fixed_vae):
 
 # Process image function
 def process_images(human_img_data, garm_img_data, garment_des, category, auto_mask=True, 
-                 denoise_steps=30, seed=1, load_mode=None):
+                 denoise_steps=30, seed=1, load_mode=None, jacket=False, hip_ratio=0.15):
     global pipe, unet, UNet_Encoder, need_restart_cpu_offloading
     
     try:
@@ -203,7 +203,7 @@ def process_images(human_img_data, garm_img_data, garment_des, category, auto_ma
         if auto_mask:
             keypoints = openpose_model(human_img.resize((384, 512)))
             model_parse, _ = parsing_model(human_img.resize((384, 512)))
-            mask, mask_gray = get_mask_location('hd', category, model_parse, keypoints)
+            mask, mask_gray = get_mask_location('hd', category, model_parse, keypoints, jacket=jacket, hip_ratio=hip_ratio)
             mask = mask.resize((768, 1024))
         else:
             # Default to full mask if auto_mask is disabled
@@ -319,12 +319,12 @@ def process_images(human_img_data, garm_img_data, garment_des, category, auto_ma
 
 # Process try-on request in background
 def process_tryon_task(job_id, human_img_data, garm_img_data, garment_des, category, 
-                     auto_mask, denoise_steps, seed, load_mode):
+                     auto_mask, denoise_steps, seed, load_mode, jacket, hip_ratio=0.15):
     try:
         processing_jobs[job_id].status = "processing"
         result_path, result_img = process_images(
             human_img_data, garm_img_data, garment_des, category, 
-            auto_mask, denoise_steps, seed, load_mode
+            auto_mask, denoise_steps, seed, load_mode, jacket, hip_ratio
         )
         
         if result_path:
@@ -355,7 +355,8 @@ async def tryon(
     auto_mask: bool = Form(True),
     denoise_steps: int = Form(30),
     seed: int = Form(1),
-    jacket: bool = Form(False)  # Add new jacket parameter
+    jacket: bool = Form(False),  # Add new jacket parameter
+    hip_ratio: float = Form(0.15)  # Add hip_ratio parameter
 ):
     # Read the uploaded files
     human_img_data = await human_img.read()
@@ -414,7 +415,7 @@ async def tryon(
         executor.submit,
         process_tryon_task,
         job_id, human_img_data, garm_img_data, garment_des, category, 
-        auto_mask, denoise_steps, seed, args.load_mode
+        auto_mask, denoise_steps, seed, args.load_mode, jacket, hip_ratio
     )
     
     return TryOnResponse(

@@ -51,7 +51,7 @@ def refine_mask(mask):
 
     return refine_mask
 
-def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: dict, width=384,height=512):
+def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: dict, width=384, height=512, jacket=False, hip_ratio=0.15):
     im_parse = model_parse.resize((width, height), Image.NEAREST)
     parse_array = np.array(im_parse)
 
@@ -77,7 +77,89 @@ def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: 
     arms_left = (parse_array == 14).astype(np.float32)
     arms_right = (parse_array == 15).astype(np.float32)
 
-    if category == 'dresses':
+    # Special case for jacket
+    if jacket:
+        # For jacket, we want to mask out the upper body till hips
+        # Create mask for upper body (torso)
+        upper_body_mask = (parse_array == label_map["upper_clothes"]).astype(np.float32) + \
+                         (parse_array == label_map["left_arm"]).astype(np.float32) + \
+                         (parse_array == label_map["right_arm"]).astype(np.float32)
+        
+        # Add part of the lower body (to include the hips)
+        hips_area = (parse_array == label_map["pants"]).astype(np.float32) + \
+                    (parse_array == label_map["skirt"]).astype(np.float32) + \
+                    (parse_array == label_map["dress"]).astype(np.float32)
+        
+        # Create a partial mask for the upper part of pants/skirt/dress (hips region)
+        hips_mask = np.zeros_like(hips_area)
+        if np.sum(hips_area) > 0:
+            # Find upper boundary of the hips area
+            hips_indices = np.where(hips_area > 0)
+            if len(hips_indices[0]) > 0:
+                top_hip_row = np.min(hips_indices[0])
+                # Take a smaller portion of the lower body part - just enough for the hip area
+                # Reduced from 0.3 to 0.15 to make mask end right at hip level
+                hip_height = int((height - top_hip_row) * hip_ratio)
+                hips_mask[top_hip_row:top_hip_row + hip_height, :] = hips_area[top_hip_row:top_hip_row + hip_height, :]
+        
+        # Combine upper body and hips mask - ensure it's float32 type
+        parse_mask = (upper_body_mask + hips_mask).astype(np.float32)
+        
+        # Fix the parser mask to exclude head and keep lower body
+        parser_mask_fixed += parse_head
+        parser_mask_changeable += np.logical_and(parse_array, np.logical_not(parser_mask_fixed))
+        
+        # Create custom arm masks for jacket
+        # Load pose points for arms
+        pose_data = keypoint["pose_keypoints_2d"]
+        pose_data = np.array(pose_data)
+        pose_data = pose_data.reshape((-1, 2))
+        
+        im_arms_left = Image.new('L', (width, height))
+        im_arms_right = Image.new('L', (width, height))
+        arms_draw_left = ImageDraw.Draw(im_arms_left)
+        arms_draw_right = ImageDraw.Draw(im_arms_right)
+        
+        shoulder_right = np.multiply(tuple(pose_data[2][:2]), height / 512.0)
+        shoulder_left = np.multiply(tuple(pose_data[5][:2]), height / 512.0)
+        elbow_right = np.multiply(tuple(pose_data[3][:2]), height / 512.0)
+        elbow_left = np.multiply(tuple(pose_data[6][:2]), height / 512.0)
+        wrist_right = np.multiply(tuple(pose_data[4][:2]), height / 512.0)
+        wrist_left = np.multiply(tuple(pose_data[7][:2]), height / 512.0)
+        
+        ARM_LINE_WIDTH = int(arm_width / 512 * height)
+        size_left = [shoulder_left[0] - ARM_LINE_WIDTH // 2, shoulder_left[1] - ARM_LINE_WIDTH // 2, 
+                    shoulder_left[0] + ARM_LINE_WIDTH // 2, shoulder_left[1] + ARM_LINE_WIDTH // 2]
+        size_right = [shoulder_right[0] - ARM_LINE_WIDTH // 2, shoulder_right[1] - ARM_LINE_WIDTH // 2, 
+                     shoulder_right[0] + ARM_LINE_WIDTH // 2, shoulder_right[1] + ARM_LINE_WIDTH // 2]
+        
+        if wrist_right[0] <= 1. and wrist_right[1] <= 1.:
+            im_arms_right = arms_right
+        else:
+            wrist_right = extend_arm_mask(wrist_right, elbow_right, 1.2)
+            arms_draw_right.line(np.concatenate((shoulder_right, elbow_right, wrist_right)).astype(np.uint16).tolist(), 'white', ARM_LINE_WIDTH, 'curve')
+            arms_draw_right.arc(size_right, 0, 360, 'white', ARM_LINE_WIDTH // 2)
+
+        if wrist_left[0] <= 1. and wrist_left[1] <= 1.:
+            im_arms_left = arms_left
+        else:
+            wrist_left = extend_arm_mask(wrist_left, elbow_left, 1.2)
+            arms_draw_left.line(np.concatenate((wrist_left, elbow_left, shoulder_left)).astype(np.uint16).tolist(), 'white', ARM_LINE_WIDTH, 'curve')
+            arms_draw_left.arc(size_left, 0, 360, 'white', ARM_LINE_WIDTH // 2)
+        
+        # Convert PIL images to numpy arrays for OpenCV operations
+        im_arms_left_np = np.array(im_arms_left).astype(np.float32) / 255.0
+        im_arms_right_np = np.array(im_arms_right).astype(np.float32) / 255.0
+        
+        # Dilate arm mask
+        arm_mask = cv2.dilate(np.logical_or(im_arms_left_np, im_arms_right_np).astype(np.float32), 
+                             np.ones((5, 5), np.uint8), iterations=4)
+        
+        # Ensure parse_mask is properly dilated
+        parse_mask = cv2.dilate(parse_mask, np.ones((5, 5), np.uint8), iterations=5)
+        parse_mask = np.logical_or(parse_mask, arm_mask).astype(np.float32)
+        
+    elif category == 'dresses':
         parse_mask = (parse_array == 7).astype(np.float32) + \
                      (parse_array == 4).astype(np.float32) + \
                      (parse_array == 5).astype(np.float32) + \
@@ -112,7 +194,8 @@ def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: 
     im_arms_right = Image.new('L', (width, height))
     arms_draw_left = ImageDraw.Draw(im_arms_left)
     arms_draw_right = ImageDraw.Draw(im_arms_right)
-    if category == 'dresses' or category == 'upper_body':
+    
+    if (category == 'dresses' or category == 'upper_body') and not jacket:
         shoulder_right = np.multiply(tuple(pose_data[2][:2]), height / 512.0)
         shoulder_left = np.multiply(tuple(pose_data[5][:2]), height / 512.0)
         elbow_right = np.multiply(tuple(pose_data[3][:2]), height / 512.0)
@@ -144,13 +227,14 @@ def get_mask_location(model_type, category, model_parse: Image.Image, keypoint: 
         parser_mask_fixed += hands_left + hands_right
 
     parser_mask_fixed = np.logical_or(parser_mask_fixed, parse_head)
-    parse_mask = cv2.dilate(parse_mask, np.ones((5, 5), np.uint16), iterations=5)
-    if category == 'dresses' or category == 'upper_body':
+    parse_mask = cv2.dilate(parse_mask, np.ones((5, 5), np.uint8), iterations=5)
+    
+    if not jacket and (category == 'dresses' or category == 'upper_body'):
         neck_mask = (parse_array == 18).astype(np.float32)
-        neck_mask = cv2.dilate(neck_mask, np.ones((5, 5), np.uint16), iterations=1)
+        neck_mask = cv2.dilate(neck_mask, np.ones((5, 5), np.uint8), iterations=1)
         neck_mask = np.logical_and(neck_mask, np.logical_not(parse_head))
         parse_mask = np.logical_or(parse_mask, neck_mask)
-        arm_mask = cv2.dilate(np.logical_or(im_arms_left, im_arms_right).astype('float32'), np.ones((5, 5), np.uint16), iterations=4)
+        arm_mask = cv2.dilate(np.logical_or(im_arms_left, im_arms_right).astype('float32'), np.ones((5, 5), np.uint8), iterations=4)
         parse_mask += np.logical_or(parse_mask, arm_mask)
 
     parse_mask = np.logical_and(parser_mask_changeable, np.logical_not(parse_mask))

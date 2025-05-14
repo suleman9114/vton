@@ -4,6 +4,10 @@ import numpy as np
 import cv2
 import os
 from pathlib import Path
+import requests
+import torch
+from torch.hub import download_url_to_file
+from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).absolute().parents[3].absolute()
 
@@ -98,3 +102,28 @@ def img2mask(img, H, W, low=10, high=90):
         y = 255 - y
 
     return y < np.percentile(y, random.randrange(low, high))
+
+def load_file_from_url(url, model_dir=None, progress=True, file_name=None):
+    """Download file from url.
+    Args:
+        url (str): URL to download file.
+        model_dir (str): Directory in which to save the file.
+        progress (bool): Whether to display a progress bar.
+        file_name (str): Name to save the file under. If None, use the basename of the URL.
+    Returns:
+        str: Path to downloaded file.
+    """
+    if model_dir is None:
+        torch_home = os.path.expanduser(os.getenv('TORCH_HOME', '~/.torch'))
+        model_dir = os.getenv('TORCH_MODEL_ZOO', os.path.join(torch_home, 'models'))
+    os.makedirs(model_dir, exist_ok=True)
+    
+    if file_name is None:
+        file_name = os.path.basename(url)
+    
+    cached_file = os.path.join(model_dir, file_name)
+    if os.path.exists(cached_file):
+        return cached_file
+    
+    download_url_to_file(url, cached_file, progress=progress)
+    return cached_file

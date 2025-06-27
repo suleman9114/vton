@@ -21,9 +21,8 @@ RUN apt-get update && \
 RUN conda create -n vton python=3.10 -y
 SHELL ["/bin/bash", "-c"]
 
-# Clone repository and checkout enhancements branch
-RUN git clone https://github.com/suleman9114/vton.git . && \
-    git checkout enhancements
+# Copy the entire project directory
+COPY . /app/
 
 # Install base requirements
 RUN source activate vton && pip install -r requirements.txt
@@ -37,41 +36,11 @@ RUN source activate vton && \
     pip install pydantic==2.10.6 && \
     pip install torchvision==0.19.1 xformers --extra-index-url https://download.pytorch.org/whl/cu121
 
-# Set environment variable for HuggingFace transfer
-ENV HF_HUB_ENABLE_HF_TRANSFER=1
-# Make Python print immediately without buffering
-ENV PYTHONUNBUFFERED=1
-# Force flush for stdout
-ENV PYTHONFAULTHANDLER=1
+# Create necessary directories
+RUN mkdir -p /app/outputs /app/temp
 
-ENV TRANSFORMERS_CACHE=/.cache/huggingface/hub
+# Expose the port that the app runs on
+EXPOSE 8080
 
-ENV MPLCONFIGDIR=/.config/matplotlib
-
-RUN mkdir -p /app/outputs && chmod -R 777 /app/outputs
-
-# Download model files
-RUN source activate vton && python -u models_download.py
-
-# Expose the port the app runs on
-EXPOSE 80
-
-# Create huggingface cache directories with proper permissions
-RUN mkdir -p /.cache/huggingface/hub && chmod -R 777 /.cache
-RUN mkdir -p /.config/matplotlib && chmod -R 777 /.config
-
-# Make sure CUDA is visible to the container
-ENV NVIDIA_VISIBLE_DEVICES=all
-ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
-
-# Default values for configurable parameters
-ENV LOAD_MODE=8bit
-ENV LOWVRAM=false
-
-# Add conda environment to path to make it easier to activate
-ENV PATH=/opt/conda/envs/vton/bin:$PATH
-
-# Run the application with IPv6 support
-SHELL ["/bin/bash", "-c"]
-ENTRYPOINT ["bash", "-c"]
-CMD ["source /opt/conda/etc/profile.d/conda.sh && conda activate vton && socat TCP6-LISTEN:80,fork TCP4:0.0.0.0:8080 & python -u api_VTON.py --load_mode ${LOAD_MODE} --lowvram ${LOWRAM} --port 8080"]
+# Set the default command
+CMD ["bash", "-c", "source activate vton && python api_VTON.py --host :: --port 8080 --load_mode 8bit"]

@@ -1,3 +1,14 @@
+"""
+IDM-VTON API with Local Models
+
+This API uses locally stored models instead of downloading from HuggingFace:
+- Main IDM-VTON models: ./models/IDM-VTON/
+- VAE model: ./models/sdxl-vae-fp16-fix/
+- Computer vision models: ./ckpt/
+
+Models were copied from HuggingFace cache to ensure offline functionality.
+"""
+
 import argparse
 import torch
 import os
@@ -61,7 +72,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--lowvram", action="store_true", help="Enable CPU offload for model operations.")
 parser.add_argument("--load_mode", default=None, type=str, choices=["4bit", "8bit"], help="Quantization mode for optimization memory consumption")
 parser.add_argument("--fixed_vae", action="store_true", default=True, help="Use fixed vae for FP16.")
-parser.add_argument("--port", type=int, default=80, help="Port to run the API on")
+parser.add_argument("--port", type=int, default=8080, help="Port to run the API on")
 parser.add_argument("--ipv6", action="store_true", help="Enable IPv6 support")
 parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind the server to")
 
@@ -94,8 +105,10 @@ def initialize_models(load_mode, fixed_vae):
     
     dtype = torch.float16
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    model_id = 'yisol/IDM-VTON'
-    vae_model_id = 'madebyollin/sdxl-vae-fp16-fix'
+    
+    # Use local model paths instead of HuggingFace model IDs
+    model_id = './models/IDM-VTON'
+    vae_model_id = './models/sdxl-vae-fp16-fix'
     
     dtypeQuantize = dtype
     if load_mode in ('4bit', '8bit'):
@@ -109,6 +122,7 @@ def initialize_models(load_mode, fixed_vae):
         model_id,
         subfolder="unet",
         torch_dtype=dtypeQuantize,
+        local_files_only=True,
     )
     if load_mode == '4bit':
         quantize_4bit(unet)
@@ -120,23 +134,26 @@ def initialize_models(load_mode, fixed_vae):
         model_id,
         subfolder="image_encoder",
         torch_dtype=torch.float16,
+        local_files_only=True,
     )
     if load_mode == '4bit':
         quantize_4bit(image_encoder)
     
     # Load VAE
     if fixed_vae:
-        vae = AutoencoderKL.from_pretrained(vae_model_id, torch_dtype=dtype)
+        vae = AutoencoderKL.from_pretrained(vae_model_id, torch_dtype=dtype, local_files_only=True)
     else:
         vae = AutoencoderKL.from_pretrained(model_id,
                                         subfolder="vae",
-                                        torch_dtype=dtype)
+                                        torch_dtype=dtype,
+                                        local_files_only=True)
     
     # Load UNet Encoder
     UNet_Encoder = UNet2DConditionModel_ref.from_pretrained(
         model_id,
         subfolder="unet_encoder",
         torch_dtype=dtypeQuantize,
+        local_files_only=True,
     )
     
     if load_mode == '4bit':
@@ -155,6 +172,7 @@ def initialize_models(load_mode, fixed_vae):
         'vae': vae,
         'image_encoder': image_encoder,
         'feature_extractor': CLIPImageProcessor(),
+        'local_files_only': True,
     }
     
     pipe = TryonPipeline.from_pretrained(**pipe_param).to(device)
@@ -448,19 +466,18 @@ async def get_job_status(job_id: str):
             status=job.status
         )
 
-# Main function to run the app
-if __name__ == "__main__":
-    args = parser.parse_args()
-    ENABLE_CPU_OFFLOAD = args.lowvram
-    
-    # Initialize the model
-    print("Initializing models...")
-    initialize_models(args.load_mode, args.fixed_vae)
-    print("Models initialized successfully!")
-    
-    # Hardcode host to IPv6 address
-    host = "::"
-    
-    # Run the server
-    print(f"Starting server on {host}:{args.port}")
-    uvicorn.run(app, host=host, port=args.port)
+
+args = parser.parse_args()
+ENABLE_CPU_OFFLOAD = args.lowvram
+
+# Initialize the model
+print("Initializing models...")
+initialize_models(args.load_mode, args.fixed_vae)
+print("Models initialized successfully!")
+
+# Hardcode host to IPv6 address
+host = "::"
+
+# Run the server
+print(f"Starting server on {host}:{args.port}")
+uvicorn.run(app, host=host, port=args.port)
